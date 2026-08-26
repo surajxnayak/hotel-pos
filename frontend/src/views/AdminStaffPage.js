@@ -1,0 +1,242 @@
+import React, { useEffect, useState } from "react";
+import AdminShell from "../components/AdminShell";
+import {
+  adminStaffList,
+  adminCreateStaff,
+  adminUpdateStaff,
+  adminActivateStaff,
+  adminDeactivateStaff,
+} from "../lib/api";
+import { toast } from "sonner";
+import { Plus, Edit2, Loader2, X, ShieldCheck, User, Power } from "lucide-react";
+import FilterTabs from "../components/FilterTabs";
+import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
+import StatusManagerModal from "../components/StatusManagerModal";
+import PinModal from "../components/PinModal";
+
+const ROLES = ["WAITER", "KITCHEN", "CASHIER", "ADMIN"];
+
+export default function AdminStaffPage() {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [edit, setEdit] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [managing, setManaging] = useState(false);
+  const [filter, setFilter] = useState("all");
+
+  const load = async () => {
+    setLoading(true);
+    try { setList(await adminStaffList()); } catch (e) { toast.error(e.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <AdminShell title="Staff">
+      <div className="flex justify-between mb-4 items-center flex-wrap gap-2">
+        <FilterTabs
+          value={filter}
+          onChange={setFilter}
+          counts={{
+            all: list.length,
+            live: list.filter((s) => s.active).length,
+            disabled: list.filter((s) => !s.active).length,
+          }}
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => setManaging(true)}
+            data-testid="manage-staff-status-btn"
+            className="flex items-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-sm px-4 py-2 transition"
+          >
+            <Power size={12} />
+            Manage status
+          </button>
+          <button
+            onClick={() => setCreating(true)}
+            data-testid="new-staff-btn"
+            className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft"
+          >
+            <Plus size={12} />
+            New Staff
+          </button>
+        </div>
+      </div>
+
+      {loading ? <Loader2 className="animate-spin text-brand mx-auto mt-10" size={24} /> : (
+        <div className="bg-surface border border-bg2 rounded-2xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-bg text-[10px] uppercase tracking-widest text-ink2 font-semibold">
+              <tr><th className="text-left px-4 py-2">Name</th><th className="text-left px-4 py-2">Username</th><th className="text-left px-4 py-2">Role</th><th className="text-left px-4 py-2">Status</th><th className="text-right px-4 py-2">Actions</th></tr>
+            </thead>
+            <tbody>
+              {list.filter((s) => filter === "all" || (filter === "live" ? s.active : !s.active)).map((s) => (
+                <tr key={s.id} className="border-t border-bg2" data-testid={`staff-row-${s.id}`}>
+                  <td className="px-4 py-2 font-medium">{s.name}</td>
+                  <td className="px-4 py-2 font-mono text-xs">@{s.username}</td>
+                  <td className="px-4 py-2 text-xs uppercase tracking-widest text-ink2">{s.role}</td>
+                  <td className="px-4 py-2"><span className={`text-[10px] uppercase tracking-widest font-semibold px-2 py-0.5 rounded-full ${s.active ? "bg-successc/15 text-successc" : "bg-red-100 text-red-700"}`}>{s.active ? "Active" : "Inactive"}</span></td>
+                  <td className="px-4 py-2 text-right">
+                    <button onClick={() => setEdit(s)} className="text-ink2 hover:text-brand p-1" data-testid={`edit-staff-${s.id}`}><Edit2 size={12} /></button>
+                  </td>
+                </tr>
+              ))}
+              {!list.length && <tr><td colSpan={5} className="text-center py-8 text-ink2">No staff.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {edit && <StaffModal staff={edit} onClose={() => setEdit(null)} onDone={() => { setEdit(null); load(); }} />}
+      {creating && (
+        <BulkCreateModal
+          title="Add Staff"
+          emptyDraft={() => ({ name: "", username: "", password: "", role: "WAITER", email: "", contactNumber: "", address: "" })}
+          validate={(d) => {
+            if (!d.name?.trim()) return "Full name is required";
+            if (!d.username?.trim()) return "Username is required";
+            if (!d.password) return "Initial password is required";
+            if (!ROLES.includes(d.role)) return "Invalid role";
+            return null;
+          }}
+          renderRow={(d, patch) => (
+            <div className="space-y-3">
+              <BulkField label="Full name" value={d.name} onChange={(v) => patch({ name: v })} required />
+              <div className="grid grid-cols-2 gap-3">
+                <BulkField label="Username" value={d.username} onChange={(v) => patch({ username: v })} required />
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Role *</span>
+                  <select value={d.role} onChange={(e) => patch({ role: e.target.value })} className="mt-1 w-full bg-surface border border-bg2 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-brand text-sm">
+                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </label>
+              </div>
+              <BulkField label="Initial password" type="password" value={d.password} onChange={(v) => patch({ password: v })} required />
+              <div className="grid grid-cols-2 gap-3">
+                <BulkField label="Email" value={d.email} onChange={(v) => patch({ email: v })} />
+                <BulkField label="Contact" value={d.contactNumber} onChange={(v) => patch({ contactNumber: v })} />
+              </div>
+              <BulkField label="Address" value={d.address} onChange={(v) => patch({ address: v })} />
+            </div>
+          )}
+          onSubmit={(pin, entries) => adminCreateStaff(pin, entries)}
+          onClose={() => setCreating(false)}
+          onDone={() => { setCreating(false); load(); }}
+        />
+      )}
+
+      {managing && (
+        <StatusManagerModal
+          title="Manage Staff Status"
+          activeLabel="Active"
+          inactiveLabel="Inactive"
+          activeRows={list.filter((s) => s.active)}
+          inactiveRows={list.filter((s) => !s.active)}
+          getId={(s) => s.id}
+          searchOf={(s) => `${s.name} ${s.username} ${s.role}`}
+          renderRow={(s) => (
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{s.name}</div>
+                <div className="text-xs text-ink2 font-mono truncate">@{s.username}</div>
+              </div>
+              <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold shrink-0">{s.role}</span>
+            </div>
+          )}
+          activateAction={{
+            verb: "Activate",
+            danger: false,
+            run: (pin, ids) => adminActivateStaff(pin, ids),
+          }}
+          deactivateAction={{
+            verb: "Deactivate",
+            danger: true,
+            run: (pin, ids) => adminDeactivateStaff(pin, ids),
+          }}
+          onClose={() => setManaging(false)}
+          onDone={() => { setManaging(false); load(); }}
+        />
+      )}
+    </AdminShell>
+  );
+}
+
+function StaffModal({ staff, onClose, onDone }) {
+  const [role, setRole] = useState(staff.role || "WAITER");
+  const [askPin, setAskPin] = useState(false);
+  const changed = role !== staff.role;
+
+  const readOnly = [
+    ["Full name", staff.name],
+    ["Username", staff.username ? `@${staff.username}` : "—"],
+    ["Email", staff.email || "—"],
+    ["Contact", staff.contactNumber || "—"],
+    ["Address", staff.address || "—"],
+  ];
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/50 grid place-items-center p-4" onClick={onClose}>
+        <div onClick={(e) => e.stopPropagation()} className="bg-surface rounded-3xl max-w-md w-full p-6 shadow-lift max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-heading text-lg font-semibold flex items-center gap-2"><User size={14} />Edit Staff</h3>
+            <button type="button" onClick={onClose} className="text-ink2 hover:text-ink p-1"><X size={16} /></button>
+          </div>
+
+          <div className="bg-bg border border-bg2 rounded-2xl p-4 mb-4 space-y-2">
+            {readOnly.map(([label, val]) => (
+              <div key={label} className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold shrink-0">{label}</span>
+                <span className="text-ink text-right truncate">{val || "—"}</span>
+              </div>
+            ))}
+          </div>
+
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Role *</span>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              data-testid="staff-role-select"
+              className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand"
+            >
+              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </label>
+
+          <p className="mt-3 text-xs text-ink2 italic">
+            Role is the only field an admin can change. Names, contact info and passwords are self-service.
+          </p>
+
+          <div className="mt-5 flex gap-2 justify-end">
+            <button type="button" onClick={onClose} className="rounded-full border border-bg2 px-4 py-2 text-sm">Cancel</button>
+            <button
+              type="button"
+              onClick={() => setAskPin(true)}
+              disabled={!changed}
+              data-testid="staff-save"
+              className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-lift disabled:opacity-50"
+            >
+              <ShieldCheck size={12} />
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {askPin && (
+        <PinModal
+          title="Confirm role change"
+          description={`Change ${staff.name}'s role to ${role}. Enter your admin PIN.`}
+          onClose={() => setAskPin(false)}
+          onSubmit={async (pin) => {
+            await adminUpdateStaff(staff.id, { pin, role });
+            toast.success("Role updated");
+            setAskPin(false);
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
+}

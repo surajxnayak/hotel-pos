@@ -1,0 +1,501 @@
+import React, { useEffect, useMemo, useState } from "react";
+import AdminShell from "../components/AdminShell";
+import {
+  adminMenuCategories, adminCreateCategory, adminUpdateCategory, adminDeleteCategory,
+  adminMenuItems, adminCreateItem, adminUpdateItem, adminDeleteItem, adminSetItemAvailability,
+} from "../lib/api";
+import { toast } from "sonner";
+import { Plus, Edit2, Trash2, X, ShieldCheck, ImageIcon, ToggleLeft, ToggleRight, Loader2, Sliders, Search } from "lucide-react";
+import FilterTabs from "../components/FilterTabs";
+import BulkCreateModal, { BulkField } from "../components/BulkCreateModal";
+import PinModal from "../components/PinModal";
+import { DietaryBadge } from "../components/DietaryAndOptions";
+import CustomizationBuilder from "../components/CustomizationBuilder";
+
+const DIETARY_OPTIONS = [
+  { key: "", label: "Untagged" },
+  { key: "VEG", label: "Veg" },
+  { key: "NON_VEG", label: "Non-veg" },
+  { key: "EGG", label: "Egg" },
+];
+
+export default function AdminMenuPage() {
+  const [cats, setCats] = useState([]);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editCat, setEditCat] = useState(null);
+  const [editItem, setEditItem] = useState(null);
+  const [creatingCat, setCreatingCat] = useState(false);
+  const [creatingItem, setCreatingItem] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [customizeFor, setCustomizeFor] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [c, i] = await Promise.all([adminMenuCategories(), adminMenuItems()]);
+      const cats = Array.isArray(c) ? c : [];
+      // Backend now returns sortOrder — respect it, falling back to name/id ties.
+      cats.sort((a, b) => {
+        const sa = a.sortOrder ?? Number.POSITIVE_INFINITY;
+        const sb = b.sortOrder ?? Number.POSITIVE_INFINITY;
+        if (sa !== sb) return sa - sb;
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      });
+      setCats(cats);
+      setItems(Array.isArray(i) ? i : []);
+    } catch (e) { toast.error(e.message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const byCat = useMemo(() => {
+    const map = {};
+    const q = search.trim().toLowerCase();
+    const passes = (it) => {
+      const availOk =
+        filter === "all" ||
+        (filter === "live" ? it.available : !it.available);
+      if (!availOk) return false;
+      if (q && !(it.name || "").toLowerCase().includes(q)) return false;
+      return true;
+    };
+    items.filter(passes).forEach((it) => { (map[it.categoryId] ||= []).push(it); });
+    return map;
+  }, [items, filter, search]);
+
+  const toggleAvail = async (it) => {
+    try { await adminSetItemAvailability(it.id, !it.available); load(); }
+    catch (e) { toast.error(e.message); }
+  };
+
+  const del = async (kind, id, name) => {
+    if (!window.confirm(`Delete ${kind} "${name}"?`)) return;
+    try {
+      if (kind === "category") await adminDeleteCategory(id);
+      else await adminDeleteItem(id);
+      toast.success("Deleted");
+      load();
+    } catch (e) {
+      if (e.status === 409) toast.error(e.message || "In use — cannot delete.");
+      else toast.error(e.message);
+    }
+  };
+
+  return (
+    <AdminShell title="Menu">
+      <div className="flex justify-between mb-4 items-center flex-wrap gap-2">
+        <FilterTabs
+          value={filter}
+          onChange={setFilter}
+          counts={{
+            all: items.length,
+            live: items.filter((i) => i.available).length,
+            disabled: items.filter((i) => !i.available).length,
+          }}
+        />
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 bg-surface border border-bg2 rounded-full px-3 py-1.5 focus-within:border-brand transition min-w-[220px]">
+            <Search size={13} className="text-ink2 shrink-0" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by item name…"
+              data-testid="admin-menu-search"
+              className="flex-1 bg-transparent outline-none text-sm"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                data-testid="admin-menu-search-clear"
+                className="text-ink2 hover:text-ink"
+                title="Clear"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+          <button onClick={() => setCreatingCat(true)} data-testid="new-category-btn" className="flex items-center gap-1.5 rounded-full border border-bg2 hover:border-brand hover:text-brand text-sm px-4 py-2 transition"><Plus size={12} />Category</button>
+          <button onClick={() => setCreatingItem(true)} data-testid="new-item-btn" className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-soft transition"><Plus size={12} />New Item</button>
+        </div>
+      </div>
+
+      {loading ? <Loader2 className="animate-spin text-brand mx-auto mt-10" size={24} /> : (
+        <div className="space-y-5">
+          {cats.map((c) => (
+            <div key={c.id} className="bg-surface border border-bg2 rounded-2xl overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-bg border-b border-bg2">
+                <h3 className="font-heading font-semibold flex-1">
+                  {c.name}
+                  {c.sortOrder != null && (
+                    <span className="ml-2 text-[10px] font-mono uppercase tracking-widest text-ink2">
+                      #{c.sortOrder}
+                    </span>
+                  )}
+                </h3>
+                <button onClick={() => setEditCat(c)} className="text-xs text-ink2 hover:text-brand p-1" data-testid={`edit-cat-${c.id}`}><Edit2 size={12} /></button>
+                <button onClick={() => del("category", c.id, c.name)} className="text-xs text-ink2 hover:text-destructive p-1"><Trash2 size={12} /></button>
+              </div>
+              <div className="divide-y divide-bg2">
+                {(byCat[c.id] || []).map((it) => {
+                  const groupCount = (it.customizationGroups || []).length;
+                  return (
+                    <div key={it.id} className={`flex items-center gap-3 px-4 py-2 ${!it.available ? "opacity-60" : ""}`} data-testid={`item-${it.id}`}>
+                      <div className="h-10 w-10 rounded-lg bg-bg overflow-hidden shrink-0">
+                        {it.imageUrl ? <img src={it.imageUrl} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full grid place-items-center text-ink2"><ImageIcon size={14} /></div>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <DietaryBadge type={it.dietaryType} />
+                          <div className="text-sm font-medium truncate">{it.name}</div>
+                        </div>
+                        <div className="text-xs text-ink2 font-mono flex items-center gap-2">
+                          <span>₹{Number(it.price).toFixed(2)}</span>
+                          {groupCount > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-brand">
+                              <Sliders size={10} />{groupCount} group{groupCount > 1 ? "s" : ""}
+                            </span>
+                          )}
+                          {it.allergens && (
+                            <span className="truncate text-amber-800 italic">contains: {it.allergens}</span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setCustomizeFor(it)}
+                        title={groupCount > 0 ? "Edit customization" : "Add customization"}
+                        data-testid={`customize-${it.id}`}
+                        className={`p-1 ${groupCount > 0 ? "text-brand" : "text-ink2 hover:text-brand"}`}
+                      >
+                        <Sliders size={14} />
+                      </button>
+                      <button onClick={() => toggleAvail(it)} title={it.available ? "Available" : "Unavailable"} data-testid={`toggle-${it.id}`} className={it.available ? "text-successc" : "text-ink2"}>
+                        {it.available ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
+                      </button>
+                      <button onClick={() => setEditItem(it)} className="text-ink2 hover:text-brand p-1" data-testid={`edit-item-${it.id}`}><Edit2 size={12} /></button>
+                      <button onClick={() => del("item", it.id, it.name)} className="text-ink2 hover:text-destructive p-1"><Trash2 size={12} /></button>
+                    </div>
+                  );
+                })}
+                {!byCat[c.id]?.length && <div className="text-center text-ink2 text-sm py-3 italic">No items yet.</div>}
+              </div>
+            </div>
+          ))}
+          {!cats.length && <div className="text-center py-10 text-ink2 border border-dashed border-bg2 rounded-2xl">No categories. Create one to start.</div>}
+        </div>
+      )}
+
+      {editCat && <CategoryModal cat={editCat} onClose={() => setEditCat(null)} onDone={() => { setEditCat(null); load(); }} />}
+      {editItem && <ItemModal item={editItem} cats={cats} onClose={() => setEditItem(null)} onDone={() => { setEditItem(null); load(); }} />}
+      {customizeFor && (
+        <CustomizationBuilder
+          item={customizeFor}
+          onClose={() => setCustomizeFor(null)}
+          onDone={() => { load(); }}
+        />
+      )}
+
+      {creatingCat && (
+        <BulkCreateModal
+          title="Add Categories"
+          emptyDraft={() => ({ name: "", sortOrder: "" })}
+          validate={(d) => {
+            if (!d.name?.trim()) return "Name is required";
+            if (d.sortOrder !== "" && d.sortOrder != null) {
+              const n = Number(d.sortOrder);
+              if (!Number.isFinite(n)) return "Sort order must be a number";
+            }
+            return null;
+          }}
+          renderRow={(d, patch) => (
+            <div className="space-y-3">
+              <BulkField label="Category name" value={d.name} onChange={(v) => patch({ name: v })} required />
+              <BulkField
+                label="Sort order"
+                type="number"
+                value={d.sortOrder}
+                onChange={(v) => patch({ sortOrder: v })}
+                placeholder="Lower shows first (optional)"
+              />
+            </div>
+          )}
+          onSubmit={(pin, entries) =>
+            adminCreateCategory(
+              pin,
+              entries.map((e) => {
+                const row = { name: e.name.trim() };
+                if (e.sortOrder !== "" && e.sortOrder != null) {
+                  row.sortOrder = Number(e.sortOrder);
+                }
+                return row;
+              })
+            )
+          }
+          onClose={() => setCreatingCat(false)}
+          onDone={() => { setCreatingCat(false); load(); }}
+        />
+      )}
+
+      {creatingItem && (
+        <BulkCreateModal
+          title="Add Menu Items"
+          emptyDraft={() => ({
+            name: "", price: "", description: "", imageUrl: "",
+            categoryId: cats[0]?.id, available: true,
+            dietaryType: "", allergens: "",
+          })}
+          validate={(d) => {
+            if (!d.name?.trim()) return "Name is required";
+            if (!d.categoryId) return "Category is required";
+            const p = Number(d.price);
+            if (!Number.isFinite(p) || p < 0) return "Valid price is required";
+            return null;
+          }}
+          renderRow={(d, patch) => (
+            <div className="space-y-3">
+              <BulkField label="Name" value={d.name} onChange={(v) => patch({ name: v })} required />
+              <div className="grid grid-cols-2 gap-3">
+                <BulkField label="Price (₹)" type="number" value={d.price} onChange={(v) => patch({ price: v })} required />
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Category *</span>
+                  <select
+                    value={d.categoryId ?? ""}
+                    onChange={(e) => patch({ categoryId: Number(e.target.value) })}
+                    className="mt-1 w-full bg-surface border border-bg2 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-brand text-sm"
+                  >
+                    {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <BulkField label="Description" value={d.description} onChange={(v) => patch({ description: v })} />
+              <BulkField label="Image URL" value={d.imageUrl} onChange={(v) => patch({ imageUrl: v })} />
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Dietary</span>
+                  <select
+                    value={d.dietaryType ?? ""}
+                    onChange={(e) => patch({ dietaryType: e.target.value })}
+                    className="mt-1 w-full bg-surface border border-bg2 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-brand text-sm"
+                  >
+                    {DIETARY_OPTIONS.map((o) => (
+                      <option key={o.key} value={o.key}>{o.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <BulkField label="Allergens" value={d.allergens} onChange={(v) => patch({ allergens: v })} placeholder="e.g. nuts, dairy" />
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={!!d.available} onChange={(e) => patch({ available: e.target.checked })} />
+                Available
+              </label>
+            </div>
+          )}
+          onSubmit={(pin, entries) =>
+            adminCreateItem(
+              pin,
+              entries.map((e) => {
+                const row = {
+                  name: e.name.trim(),
+                  price: Number(e.price),
+                  description: e.description || "",
+                  imageUrl: e.imageUrl || "",
+                  categoryId: e.categoryId,
+                  available: !!e.available,
+                };
+                if (e.dietaryType) row.dietaryType = e.dietaryType;
+                if (e.allergens && e.allergens.trim()) row.allergens = e.allergens.trim();
+                return row;
+              })
+            )
+          }
+          onClose={() => setCreatingItem(false)}
+          onDone={() => { setCreatingItem(false); load(); }}
+        />
+      )}
+    </AdminShell>
+  );
+}
+
+function CategoryModal({ cat, onClose, onDone }) {
+  const [name, setName] = useState(cat.name || "");
+  const [sortOrder, setSortOrder] = useState(
+    cat.sortOrder == null ? "" : String(cat.sortOrder)
+  );
+  const [askPin, setAskPin] = useState(false);
+
+  const diff = () => {
+    const d = {};
+    const trimmed = name.trim();
+    if (trimmed && trimmed !== cat.name) d.name = trimmed;
+    if (sortOrder !== "" && Number(sortOrder) !== cat.sortOrder) {
+      d.sortOrder = Number(sortOrder);
+    }
+    return d;
+  };
+
+  const changes = diff();
+  const canSave = Object.keys(changes).length > 0 && (!("sortOrder" in changes) || Number.isFinite(changes.sortOrder));
+
+  return (
+    <>
+      <ModalShell title="Edit Category" onClose={onClose}>
+        <div className="space-y-3">
+          <Field label="Category name" value={name} onChange={setName} autoFocus />
+          <Field
+            label="Sort order"
+            type="number"
+            value={sortOrder}
+            onChange={setSortOrder}
+            placeholder="Lower shows first"
+          />
+          <p className="text-xs text-ink2 italic">
+            Both fields are optional — leave a field unchanged and it won&apos;t be sent.
+          </p>
+        </div>
+        <PinSubmitBar canSave={canSave} onClose={onClose} onClick={() => setAskPin(true)} />
+      </ModalShell>
+
+      {askPin && (
+        <PinModal
+          title="Confirm category update"
+          description={`Update category "${cat.name}". Enter your admin PIN.`}
+          onClose={() => setAskPin(false)}
+          onSubmit={async (pin) => {
+            await adminUpdateCategory(cat.id, { pin, ...changes });
+            toast.success("Updated");
+            setAskPin(false);
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function ItemModal({ item, cats, onClose, onDone }) {
+  const [f, setF] = useState({
+    name: item.name || "",
+    price: item.price != null ? String(item.price) : "",
+    description: item.description || "",
+    imageUrl: item.imageUrl || "",
+    categoryId: item.categoryId || cats[0]?.id,
+    dietaryType: item.dietaryType || "",
+    allergens: item.allergens || "",
+  });
+  const [askPin, setAskPin] = useState(false);
+  const set = (k) => (v) => setF({ ...f, [k]: v });
+
+  const diff = () => {
+    const d = {};
+    if (f.name.trim() !== (item.name || "")) d.name = f.name.trim();
+    if (f.description !== (item.description || "")) d.description = f.description;
+    if (f.imageUrl !== (item.imageUrl || "")) d.imageUrl = f.imageUrl;
+    if (Number(f.categoryId) !== item.categoryId) d.categoryId = Number(f.categoryId);
+    const priceNum = Number(f.price);
+    if (f.price !== "" && Number.isFinite(priceNum) && priceNum !== Number(item.price)) {
+      d.price = priceNum;
+    }
+    // dietaryType — empty string means clear (send null)
+    if ((f.dietaryType || null) !== (item.dietaryType || null)) {
+      d.dietaryType = f.dietaryType || null;
+    }
+    const nextAllergens = f.allergens.trim() || null;
+    const curAllergens = item.allergens || null;
+    if (nextAllergens !== curAllergens) d.allergens = nextAllergens;
+    return d;
+  };
+
+  const changes = diff();
+  const canSave = Object.keys(changes).length > 0 && f.name.trim() && f.categoryId;
+
+  return (
+    <>
+      <ModalShell title="Edit Item" onClose={onClose}>
+        <div className="space-y-3">
+          <Field label="Name" value={f.name} onChange={set("name")} autoFocus />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Price (₹)" type="number" value={f.price} onChange={set("price")} />
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Category</span>
+              <select
+                value={f.categoryId}
+                onChange={(e) => set("categoryId")(Number(e.target.value))}
+                className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand"
+              >
+                {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <Field label="Description" value={f.description} onChange={set("description")} />
+          <Field label="Image URL" value={f.imageUrl} onChange={set("imageUrl")} />
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">Dietary</span>
+              <select
+                value={f.dietaryType}
+                onChange={(e) => set("dietaryType")(e.target.value)}
+                className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand"
+              >
+                {DIETARY_OPTIONS.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+            </label>
+            <Field label="Allergens" value={f.allergens} onChange={set("allergens")} placeholder="e.g. nuts, dairy" />
+          </div>
+          <p className="text-xs text-ink2 italic">
+            Availability isn&apos;t edited here — toggle it directly from the item row.
+            Use the <Sliders size={10} className="inline align-baseline" /> icon on the row to configure portion sizes / add-ons.
+          </p>
+        </div>
+        <PinSubmitBar canSave={canSave} onClose={onClose} onClick={() => setAskPin(true)} />
+      </ModalShell>
+
+      {askPin && (
+        <PinModal
+          title="Confirm item update"
+          description={`Update "${item.name}". Enter your admin PIN.`}
+          onClose={() => setAskPin(false)}
+          onSubmit={async (pin) => {
+            await adminUpdateItem(item.id, { pin, ...changes });
+            toast.success("Updated");
+            setAskPin(false);
+            onDone();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function ModalShell({ title, children, onClose }) {
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/50 grid place-items-center p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-surface rounded-3xl max-w-md w-full p-6 shadow-lift max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-4"><h3 className="font-heading text-lg font-semibold">{title}</h3><button onClick={onClose} className="text-ink2 hover:text-ink p-1"><X size={16} /></button></div>
+        {children}
+      </div>
+    </div>
+  );
+}
+function Field({ label, value, onChange, type, required, autoFocus, placeholder }) {
+  return <label className="block"><span className="text-[10px] uppercase tracking-widest text-ink2 font-semibold">{label} {required && <span className="text-destructive">*</span>}</span><input type={type || "text"} value={value} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus} placeholder={placeholder} className="mt-1 w-full bg-bg border border-bg2 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-brand" /></label>;
+}
+function PinSubmitBar({ canSave, onClose, onClick }) {
+  return (
+    <div className="mt-5 flex gap-2 justify-end">
+      <button type="button" onClick={onClose} className="rounded-full border border-bg2 px-4 py-2 text-sm">Cancel</button>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!canSave}
+        data-testid="modal-save"
+        className="flex items-center gap-1.5 rounded-full bg-brand hover:bg-brandHover text-white text-sm px-4 py-2 shadow-lift disabled:opacity-50"
+      >
+        <ShieldCheck size={12} />
+        Save
+      </button>
+    </div>
+  );
+}
