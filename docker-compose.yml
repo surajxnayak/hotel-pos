@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DB_HOST: host.docker.internal
+      DB_PORT: 3306
+      DB_NAME: projectDB
+      DB_USERNAME: root
+      DB_PASSWORD: rundev
+      JWT_SECRET: change-this-to-a-long-random-secret-in-production-min-32-bytes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_API_BASE_URL: http://localhost:8080
+        REACT_APP_WS_BASE_URL: http://localhost:8080/ws
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
